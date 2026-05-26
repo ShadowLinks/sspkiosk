@@ -1,0 +1,111 @@
+<?php
+
+namespace App\Services;
+
+use App\Enums\KioskStatus;
+use App\Models\Kiosk;
+use Illuminate\Support\Facades\DB;
+
+class AdminKioskService
+{
+    public function __construct(
+        private readonly KioskEnrollmentService $enrollment,
+        private readonly KioskCredentialService $credentials,
+        private readonly AuditLogService $auditLog,
+    ) {}
+
+    /**
+     * @param  array{name: string, school?: ?string, location?: ?string, allowed_ip?: ?string, allowed_subnet?: ?string}  $attributes
+     * @return array{kiosk: Kiosk, enrollment_code: string}
+     */
+    public function createKiosk(array $attributes, int $adminUserId): array
+    {
+        return DB::transaction(function () use ($attributes, $adminUserId): array {
+            $kiosk = $this->enrollment->createKiosk($attributes);
+            $enrollmentCode = $this->enrollment->issueEnrollmentCode($kiosk);
+
+            $this->auditLog->logAdmin(
+                'admin.kiosk.created',
+                $adminUserId,
+                'kiosk',
+                (string) $kiosk->id,
+                ['name' => $kiosk->name],
+            );
+
+            return [
+                'kiosk' => $kiosk,
+                'enrollment_code' => $enrollmentCode,
+            ];
+        });
+    }
+
+    public function disable(Kiosk $kiosk, int $adminUserId): void
+    {
+        $kiosk->update(['status' => KioskStatus::Disabled]);
+
+        $this->auditLog->logAdmin(
+            'admin.kiosk.disabled',
+            $adminUserId,
+            'kiosk',
+            (string) $kiosk->id,
+        );
+    }
+
+    public function enable(Kiosk $kiosk, int $adminUserId): void
+    {
+        $kiosk->update(['status' => KioskStatus::Active]);
+
+        $this->auditLog->logAdmin(
+            'admin.kiosk.enabled',
+            $adminUserId,
+            'kiosk',
+            (string) $kiosk->id,
+        );
+    }
+
+    public function rotateSecret(Kiosk $kiosk, int $adminUserId): string
+    {
+        $secret = $this->credentials->generateSecret();
+        $kiosk->update([
+            'secret_hash' => $this->credentials->encryptSecret($secret),
+        ]);
+
+        $this->auditLog->logAdmin(
+            'admin.kiosk.secret_rotated',
+            $adminUserId,
+            'kiosk',
+            (string) $kiosk->id,
+        );
+
+        return $secret;
+    }
+
+    public function issueEnrollmentCode(Kiosk $kiosk, int $adminUserId): string
+    {
+        if ($this->credentials->isEnrolled($kiosk)) {
+            throw new \RuntimeException('Kiosk is already enrolled. Rotate the secret before issuing a new enrollment code.');
+        }
+
+        $code = $this->enrollment->issueEnrollmentCode($kiosk);
+
+        $this->auditLog->logAdmin(
+            'admin.kiosk.enrollment_code_issued',
+            $adminUserId,
+            'kiosk',
+            (string) $kiosk->id,
+        );
+
+        return $code;
+    }
+
+    public function isOnline(Kiosk $kiosk): bool
+    {
+        if ($kiosk->last_seen_at === null) {
+            return false;
+        }
+
+        return $kiosk->last_seen_at->greaterThan(
+            now()->subSeconds(config('kiosk.heartbeat_expires_after_seconds')),
+        );
+    }
+}
