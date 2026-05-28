@@ -32,6 +32,16 @@ A student signs in with Google once (when they still know their password) and co
 
 After registration, the student is eligible for kiosk-assisted resets later.
 
+### Registering a kiosk (technology staff)
+
+Before students use password reset, each physical kiosk is registered once:
+
+1. **Create** the kiosk in the admin dashboard (or CLI) and copy the one-time **enrollment code**.
+2. **Enroll** the device—either open `/kiosk/enroll` in the kiosk browser and enter the code, or call the JSON enroll API and store the device secret for heartbeats.
+3. **Use** `/kiosk/reset` as the kiosk home page (browser session must persist).
+
+See [docs/SETUP.md](docs/SETUP.md#registering-a-kiosk) for heartbeat, HMAC, and troubleshooting.
+
 ### Password reset (when the student cannot sign in)
 
 At a district kiosk, the student:

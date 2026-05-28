@@ -113,51 +113,116 @@ Students do **not** wait at the kiosk for Slack approval.
 
 Pending passwords are encrypted at rest, never logged, never in Slack/admin/audit, and removed after approval, denial, expiration, or Google failure (per config).
 
-## Kiosk reset flow (Phase 5+)
+## Registering a kiosk
 
-After the kiosk is enrolled, bound to a browser session, and sending heartbeats:
+A kiosk must be **created in admin**, **enrolled once** with a one-time code, and have an active **browser session** before students can use `/kiosk/reset`. Optionally, a small on-device agent sends **HMAC heartbeats** (recommended when `KIOSK_REQUIRE_ACTIVE_HEARTBEAT=true`).
 
-| Step | Route | Description |
-|------|--------|-------------|
-| Start | `GET /kiosk/reset` | Enter email or student ID |
-| Lookup | `POST /kiosk/reset/lookup` | HMAC + session; generic message if not found |
-| Confirm | `GET /kiosk/reset/confirm` | First name + last initial |
-| Photo | `GET/POST /kiosk/reset/photo` | Reset request photo |
-| Questions | `GET/POST /kiosk/reset/submit` | Random challenge questions |
-| Password (mode 2 only) | `GET/POST /kiosk/reset/password` | Student-selected password + confirmation |
-| Pending password (mode 1) | `GET /kiosk/reset/pending-password/{id}` | One-time display before approval |
-| Submitted (mode 2) | `GET /kiosk/reset/submitted/{id}` | Confirmation after password entry |
-
-Failed challenge answers do not reveal which were wrong. A successful request queues `SendSlackResetApprovalJob` (Slack message in Phase 6).
-
-## Kiosk setup (Phase 4)
-
-### 1. Create a kiosk
-
-Use the **admin dashboard** at `/admin` (after creating an admin user), or the CLI:
+### Step 1 — Create an admin user (first time only)
 
 ```bash
 php artisan admin:create-user admin@yourdistrict.org
+```
+
+Sign in at `/admin/login`.
+
+### Step 2 — Create the kiosk record
+
+**Admin dashboard (recommended):**
+
+1. Go to **Kiosks → Create kiosk**.
+2. Enter name, school, location, and optional allowed subnet.
+3. Copy the **one-time enrollment code** shown after creation (or issue a new code later from the kiosk detail page).
+
+**CLI (alternative):**
+
+```bash
 php artisan kiosk:create "Library Front Desk" --school="Main School" --location="Library" --subnet=10.10.20.0/24
 php artisan kiosk:enrollment-code {kiosk_id_or_uuid}
 ```
 
-In the dashboard: **Kiosks → Create kiosk** issues an enrollment code once; **Manage** supports disable, rotate secret, and request history.
+From the kiosk detail page you can also disable the kiosk, rotate its secret, issue a new enrollment code, or delete it (only if it has no reset request history).
 
-### 2. Enroll the physical kiosk
+### Step 3 — Enroll the physical device
+
+Enrollment exchanges the one-time code for a kiosk identity. Choose **one** path:
+
+#### Option A — Browser enrollment (simplest for a locked-down kiosk PC)
+
+1. On the kiosk browser, open:
+
+   ```
+   https://your-host/kiosk/enroll
+   ```
+
+2. Enter the enrollment code from the admin dashboard and submit.
+
+3. On success, the app stores the kiosk ID in the browser session and redirects to `/kiosk/reset`.
+
+4. Bookmark `/kiosk/reset` as the kiosk home page. Do not clear cookies on that browser profile.
+
+The enrollment **secret is not shown** in the browser (JSON API clients receive it; see Option B). Browser kiosks rely on the session cookie plus CSRF for reset forms.
+
+#### Option B — API enrollment (for a kiosk agent or custom integration)
 
 ```http
 POST /kiosk/enroll
 Content-Type: application/json
+Accept: application/json
 
 {"enrollment_code":"XXXX-XXXX-XXXX"}
 ```
 
-Response includes `kiosk_uuid` and `secret` **once**. Store the secret on the device only.
+Response (shown **once**):
 
-### 3. Signed requests
+```json
+{
+  "kiosk_id": 1,
+  "kiosk_uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "secret": "base64-or-hex-secret",
+  "message": "Store the secret on the kiosk device. It will not be shown again."
+}
+```
 
-All protected kiosk endpoints require headers:
+Store `secret` and `kiosk_uuid` securely on the device. Then:
+
+1. Send signed **heartbeats** (see below).
+2. Call **`POST /kiosk/bind-session`** with HMAC headers and a web session cookie if students will register on this kiosk (`REGISTRATION_REQUIRES_KIOSK=true`) or you need to bind session without using Option A.
+
+### Step 4 — Heartbeat (when required)
+
+If `KIOSK_REQUIRE_ACTIVE_HEARTBEAT=true` (default in `.env.example`), the kiosk must call:
+
+```http
+POST /kiosk/heartbeat
+```
+
+every `KIOSK_HEARTBEAT_INTERVAL_SECONDS`, with HMAC headers (see below). Without a recent heartbeat, `/kiosk/reset` redirects to the unavailable page.
+
+For a **browser-only** kiosk (Option A), either:
+
+- Run a small local script on the PC that sends signed heartbeats using the secret from Option B enrollment, or
+- Set `KIOSK_REQUIRE_ACTIVE_HEARTBEAT=false` only if your security policy allows it (not recommended for production).
+
+### Step 5 — Bind browser session (API enroll + student registration on kiosk)
+
+If you enrolled via **Option B** and students will complete **registration** at this kiosk (`REGISTRATION_REQUIRES_KIOSK=true`):
+
+```http
+POST /kiosk/bind-session
+```
+
+Use the same HMAC headers as heartbeat, with an active web session cookie. This sets the kiosk ID in session so `/register` works on that browser.
+
+Browser enrollment (Option A) sets the session automatically; you do not need a separate bind call for password reset.
+
+### HMAC-signed API requests
+
+These endpoints require signed headers:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /kiosk/heartbeat` | Prove the device is online |
+| `POST /kiosk/bind-session` | Attach kiosk to browser session |
 
 | Header | Description |
 |--------|-------------|
@@ -179,27 +244,39 @@ Canonical string (newline-separated):
 
 Sign with the enrollment secret. Requests are rejected if the timestamp is outside `KIOSK_HMAC_TOLERANCE_SECONDS`, the nonce was reused, the IP is not allowed, or the signature is invalid.
 
-### 4. Heartbeat
+**Student reset forms** (`POST /kiosk/reset/lookup`, photo, submit, password) use the **web session + CSRF only**, not HMAC—they are standard HTML forms in the kiosk browser.
 
-```http
-POST /kiosk/heartbeat
-```
+### Troubleshooting kiosk access
 
-Call every `KIOSK_HEARTBEAT_INTERVAL_SECONDS`. If `KIOSK_REQUIRE_ACTIVE_HEARTBEAT=true`, reset routes (Phase 5+) require a recent heartbeat.
+| Symptom | Likely cause |
+|---------|----------------|
+| Redirect loop or blank page on unavailable | Fixed in current app: `/kiosk/reset/unavailable` must load without a kiosk session. Update if you see a loop on older code. |
+| Redirect to `/kiosk/reset/unavailable` | No kiosk in session (enroll again), kiosk disabled, IP blocked, stale heartbeat, or invalid `RESET_PASSWORD_MODE`. |
+| `401` on heartbeat or bind-session | Wrong secret, clock skew, bad signature, or reused nonce. |
+| `401` on reset form POST | Should not happen on current code; reset POSTs do not use HMAC. |
 
-### 5. Bind browser session (optional registration on kiosk)
+### Network and secrets
 
-```http
-POST /kiosk/bind-session
-```
+- Configure `KIOSK_ALLOWED_NETWORKS` and/or per-kiosk `allowed_ip` / `allowed_subnet`.
+- Behind a reverse proxy, configure trusted proxies so `$request->ip()` is correct.
+- `kiosks.secret_hash` stores the enrollment secret **encrypted** with Laravel `Crypt` (not plaintext).
 
-Requires the same signed headers plus a web session cookie. Sets the kiosk ID in session for `REGISTRATION_REQUIRES_KIOSK=true`.
+## Kiosk reset flow (Phase 5+)
 
-### Secret storage note
+After the kiosk is enrolled and the browser session is active (and heartbeat is fresh if required):
 
-`kiosks.secret_hash` stores the enrollment secret **encrypted** with Laravel `Crypt` (not plaintext). This allows HMAC verification without exposing secrets in logs.
+| Step | Route | Description |
+|------|--------|-------------|
+| Start | `GET /kiosk/reset` | Enter email or student ID |
+| Lookup | `POST /kiosk/reset/lookup` | Session + CSRF; generic message if not found |
+| Confirm | `GET /kiosk/reset/confirm` | First name + last initial |
+| Photo | `GET/POST /kiosk/reset/photo` | Reset request photo |
+| Questions | `GET/POST /kiosk/reset/submit` | Random challenge questions |
+| Password (mode 2 only) | `GET/POST /kiosk/reset/password` | Student-selected password + confirmation |
+| Pending password (mode 1) | `GET /kiosk/reset/pending-password/{id}` | One-time display before approval |
+| Submitted (mode 2) | `GET /kiosk/reset/submitted/{id}` | Confirmation after password entry |
 
-Configure `KIOSK_ALLOWED_NETWORKS` and/or per-kiosk `allowed_ip` / `allowed_subnet`. Behind a reverse proxy, configure trusted proxies so `$request->ip()` is correct.
+Failed challenge answers do not reveal which were wrong. A successful request queues `SendSlackResetApprovalJob` (Slack message in Phase 6).
 
 ## Google OAuth setup (Phase 2)
 

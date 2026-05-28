@@ -2,11 +2,19 @@
 
 Laravel application for secure K-12 student password reset requests via district kiosks, with Slack approval and Google Workspace integration.
 
-**Setup:** see [docs/SETUP.md](docs/SETUP.md)
+**About the product:** [about.md](about.md)
 
-**Ubuntu production install (Apache + MySQL):** see [docs/INSTALL-UBUNTU.md](docs/INSTALL-UBUNTU.md)
+**Setup and configuration:** [docs/SETUP.md](docs/SETUP.md) — includes [registering a kiosk](docs/SETUP.md#registering-a-kiosk)
 
-**Product spec:** see [prompts/main.md](prompts/main.md) and [prompts/configuration_rules.md](prompts/configuration_rules.md)
+**Ubuntu production install (Apache + MySQL):** [docs/INSTALL-UBUNTU.md](docs/INSTALL-UBUNTU.md)
+
+**Product spec:** [prompts/main.md](prompts/main.md) and [prompts/configuration_rules.md](prompts/configuration_rules.md)
+
+### Quick start: register a kiosk
+
+1. Create an admin: `php artisan admin:create-user you@district.org`
+2. In `/admin`, create a kiosk and copy the enrollment code.
+3. On the kiosk browser, open `/kiosk/enroll`, enter the code, then use `/kiosk/reset` as the home page.
 
 ---
 

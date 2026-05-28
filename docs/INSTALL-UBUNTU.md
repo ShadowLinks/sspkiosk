@@ -827,7 +827,11 @@ Sign in at: `https://kiosk.yourdistrict.org/admin/login`
 
 ### Step 12.2 — Create a kiosk (dashboard or CLI)
 
-**Admin dashboard:** **Kiosks → Create kiosk** — save the one-time enrollment code shown.
+**Admin dashboard:**
+
+1. Sign in at `https://kiosk.yourdistrict.org/admin/login`.
+2. Open **Kiosks → Create kiosk**.
+3. Save the **one-time enrollment code** shown after creation.
 
 **CLI:**
 
@@ -836,26 +840,32 @@ php artisan kiosk:create "Library Front Desk" --school="Main School" --location=
 php artisan kiosk:enrollment-code KIOSK_UUID_OR_ID
 ```
 
-### Step 12.3 — Enroll the physical kiosk device
+### Step 12.3 — Register (enroll) the physical kiosk
 
-On the kiosk device (or test script), call:
+Pick one enrollment method on the kiosk PC:
+
+**Browser enrollment (typical for a lab or library kiosk):**
+
+1. On the kiosk, open `https://kiosk.yourdistrict.org/kiosk/enroll`.
+2. Enter the enrollment code and submit.
+3. Confirm you are redirected to `/kiosk/reset`.
+4. Set the browser home page or shortcut to `/kiosk/reset`. Do not clear cookies for this profile.
+
+**API enrollment (if a local agent stores the secret and sends heartbeats):**
 
 ```http
 POST https://kiosk.yourdistrict.org/kiosk/enroll
 Content-Type: application/json
+Accept: application/json
 
 {"enrollment_code":"XXXX-XXXX-XXXX"}
 ```
 
-Save the returned `secret` and `kiosk_uuid` on the device only.
+Save `secret` and `kiosk_uuid` on the device. Configure the agent to call `POST /kiosk/heartbeat` with HMAC headers every `KIOSK_HEARTBEAT_INTERVAL_SECONDS`.
 
-Then bind the browser session:
+If students will **register** on this kiosk (`REGISTRATION_REQUIRES_KIOSK=true`), also call `POST /kiosk/bind-session` with HMAC headers and a browser session cookie.
 
-```http
-POST https://kiosk.yourdistrict.org/kiosk/bind-session
-```
-
-With signed HMAC headers (see [SETUP.md](SETUP.md)).
+Full details (HMAC canonical string, heartbeat requirements, troubleshooting): [SETUP.md — Registering a kiosk](SETUP.md#registering-a-kiosk).
 
 ### Step 12.4 — Verification checklist
 
@@ -863,8 +873,9 @@ With signed HMAC headers (see [SETUP.md](SETUP.md)).
 |-------|-----|
 | App health | `curl -I https://kiosk.yourdistrict.org/up` |
 | Configuration | `php artisan ssp:config-check` (includes valid `RESET_PASSWORD_MODE`) |
+| Kiosk enrollment | `/kiosk/enroll` with a test code → lands on `/kiosk/reset` |
 | Registration | Open `/register`, sign in with a student test account |
-| Kiosk reset | Open `/kiosk/reset` after bind-session + heartbeat; complete through pending-password or submitted screen |
+| Kiosk reset | Complete a test reset through pending-password or submitted screen |
 | Reset mode | `.env` has `RESET_PASSWORD_MODE=temporary_generated` or `student_selected_pending_approval` |
 | Pending password | After a test reset, admin request detail shows encrypted pending password metadata (not the password) |
 | Slack approval | Approve a test request; queue worker processes `ResetGooglePasswordJob` |

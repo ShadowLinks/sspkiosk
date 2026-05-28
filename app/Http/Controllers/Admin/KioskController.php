@@ -107,4 +107,19 @@ class KioskController extends Controller
             ->with('status', 'Enrollment code issued.')
             ->with('enrollment_code', $code);
     }
+
+    public function destroy(Request $request, Kiosk $kiosk): RedirectResponse
+    {
+        if ($kiosk->passwordResetRequests()->exists()) {
+            return redirect()
+                ->route('admin.kiosks.show', $kiosk)
+                ->with('error', 'This kiosk cannot be deleted because it has password reset request history.');
+        }
+
+        $kiosk->delete();
+
+        return redirect()
+            ->route('admin.kiosks.index')
+            ->with('status', 'Kiosk deleted.');
+    }
 }

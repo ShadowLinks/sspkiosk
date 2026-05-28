@@ -8,6 +8,8 @@ use App\Services\AuditLogService;
 use App\Services\KioskEnrollmentService;
 use App\Services\KioskNetworkService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\View\View;
 
 class KioskEnrollmentController extends Controller
 {
@@ -17,13 +19,20 @@ class KioskEnrollmentController extends Controller
         private readonly AuditLogService $auditLog,
     ) {}
 
-    public function enroll(KioskEnrollRequest $request): JsonResponse
+    public function showEnroll(): View
+    {
+        return view('kiosk.enroll');
+    }
+
+    public function enroll(KioskEnrollRequest $request): JsonResponse|RedirectResponse
     {
         if (! $this->networks->isRequestIpAllowed($request)) {
-            return response()->json([
-                'message' => 'Request IP is not allowed.',
-                'reason' => 'ip_not_allowed',
-            ], 403);
+            return $this->enrollmentFailureResponse(
+                $request,
+                'Request IP is not allowed.',
+                'ip_not_allowed',
+                403,
+            );
         }
 
         try {
@@ -37,10 +46,12 @@ class KioskEnrollmentController extends Controller
                 'ip_address' => $request->ip(),
             ]);
 
-            return response()->json([
-                'message' => $exception->getMessage(),
-                'reason' => $exception->getReasonCode(),
-            ], $exception->getCode());
+            return $this->enrollmentFailureResponse(
+                $request,
+                $exception->getMessage(),
+                $exception->getReasonCode(),
+                $exception->getCode(),
+            );
         }
 
         $this->auditLog->logSystem('kiosk.enrollment.completed', 'kiosk', (string) $result['kiosk_id'], [
@@ -48,11 +59,41 @@ class KioskEnrollmentController extends Controller
             'ip_address' => $request->ip(),
         ]);
 
-        return response()->json([
-            'kiosk_id' => $result['kiosk_id'],
-            'kiosk_uuid' => $result['kiosk_uuid'],
-            'secret' => $result['secret'],
-            'message' => 'Store the secret on the kiosk device. It will not be shown again.',
-        ]);
+        if ($request->expectsJson()) {
+            return response()->json([
+                'kiosk_id' => $result['kiosk_id'],
+                'kiosk_uuid' => $result['kiosk_uuid'],
+                'secret' => $result['secret'],
+                'message' => 'Store the secret on the kiosk device. It will not be shown again.',
+            ]);
+        }
+
+        $request->session()->put(
+            config('kiosk.registration_session_kiosk_key'),
+            $result['kiosk_id'],
+        );
+
+        return redirect()
+            ->route('kiosk.reset.index')
+            ->with('success', 'Kiosk enrolled successfully. Store the device secret securely — it is not shown again in the browser.');
+    }
+
+    private function enrollmentFailureResponse(
+        KioskEnrollRequest $request,
+        string $message,
+        string $reason,
+        int $status,
+    ): JsonResponse|RedirectResponse {
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => $message,
+                'reason' => $reason,
+            ], $status);
+        }
+
+        return redirect()
+            ->route('kiosk.enroll.form')
+            ->withInput()
+            ->with('error', $message);
     }
 }

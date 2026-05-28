@@ -37,6 +37,7 @@ Route::middleware('web')->prefix($prefix)->name('admin.')->group(function () {
             ->name('kiosks.rotate-secret');
         Route::post('kiosks/{kiosk}/enrollment-code', [KioskController::class, 'issueEnrollmentCode'])
             ->name('kiosks.enrollment-code');
+        Route::delete('kiosks/{kiosk}', [KioskController::class, 'destroy'])->name('kiosks.destroy');
 
         Route::get('students', [StudentController::class, 'index'])->name('students.index');
         Route::get('students/{student}', [StudentController::class, 'show'])->name('students.show');

@@ -43,4 +43,22 @@ class KioskEnrollmentTest extends TestCase
         $this->postJson(route('kiosk.enroll'), ['enrollment_code' => $code])->assertOk();
         $this->postJson(route('kiosk.enroll'), ['enrollment_code' => $code])->assertUnauthorized();
     }
+
+    public function test_browser_enrollment_sets_session_and_redirects_to_reset(): void
+    {
+        config(['kiosk.allowed_networks' => ['127.0.0.1']]);
+
+        $enrollment = app(KioskEnrollmentService::class);
+        $kiosk = $enrollment->createKiosk(['name' => 'Browser Kiosk']);
+        $code = $enrollment->issueEnrollmentCode($kiosk);
+
+        $this->get(route('kiosk.enroll.form'))->assertOk();
+
+        $response = $this->post(route('kiosk.enroll'), [
+            'enrollment_code' => $code,
+        ]);
+
+        $response->assertRedirect(route('kiosk.reset.index'));
+        $response->assertSessionHas(config('kiosk.registration_session_kiosk_key'), $kiosk->id);
+    }
 }

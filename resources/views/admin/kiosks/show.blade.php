@@ -39,6 +39,17 @@
                     <button type="submit" class="btn btn-secondary">Issue enrollment code</button>
                 </form>
             @endif
+
+            <form
+                method="post"
+                action="{{ route('admin.kiosks.destroy', $kiosk) }}"
+                class="inline"
+                onsubmit="return confirm('Delete this kiosk? This cannot be undone.');"
+            >
+                @csrf
+                @method('DELETE')
+                <button type="submit" class="btn btn-danger">Delete kiosk</button>
+            </form>
         </div>
     </div>
 

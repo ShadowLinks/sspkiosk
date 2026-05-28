@@ -96,6 +96,33 @@ class AdminDashboardTest extends TestCase
         );
     }
 
+    public function test_admin_can_delete_kiosk_without_reset_history(): void
+    {
+        $admin = $this->adminUser();
+        $kiosk = Kiosk::factory()->create();
+
+        $this->actingAs($admin)
+            ->delete(route('admin.kiosks.destroy', $kiosk))
+            ->assertRedirect(route('admin.kiosks.index'))
+            ->assertSessionHas('status');
+
+        $this->assertNull(Kiosk::query()->find($kiosk->id));
+    }
+
+    public function test_admin_cannot_delete_kiosk_with_reset_history(): void
+    {
+        $admin = $this->adminUser();
+        $kiosk = Kiosk::factory()->create();
+        PasswordResetRequest::factory()->create(['kiosk_id' => $kiosk->id]);
+
+        $this->actingAs($admin)
+            ->delete(route('admin.kiosks.destroy', $kiosk))
+            ->assertRedirect(route('admin.kiosks.show', $kiosk))
+            ->assertSessionHas('error');
+
+        $this->assertNotNull($kiosk->fresh());
+    }
+
     public function test_admin_can_disable_student_reset_eligibility(): void
     {
         $admin = $this->adminUser();
